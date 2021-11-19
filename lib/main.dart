@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
-
+import 'package:path/path.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -57,25 +57,17 @@ class _MyHomePageState extends State<MyHomePage> {
   TextEditingController destinationFileController = TextEditingController();
   TextEditingController messageController = TextEditingController();
 
+  // internal filenames for encryption and decryption
+  String cipherFilenameTemp = 'ciphertemp.dat'; // filename will change
+  String cipherFilenameExt = '.enc'; // added to original filename
+  String decryptFilenameTemp = 'decrypttemp.dat'; // filename will change
+
   String txtDescription = 'AES-256 GCM file encryption, the key is'
       ' derivated by PBKDF2 from a user password.';
   bool encryptionMode = true; // true = encryption
   String runButtonText = 'encrypt';
+  String chooseFileButtonText = 'choose a file for encryption';
   int _radioValue1 = -1;
-
-  // vars for file dialog
-  bool _isBusy = false;
-  //OpenFileDialogType _dialogType = OpenFileDialogType.image;
-  OpenFileDialogType _dialogType = OpenFileDialogType.document;
-  SourceType _sourceType = SourceType.photoLibrary;
-  bool _allowEditing = false;
-  //File _currentFile; // not null safety
-  File? _currentFile = File('');
-  String _savedFilePath = '';
-  bool _localOnly = false;
-  //bool _copyFileToCacheDir = true; // true datei wird automatisch kopiert
-  bool _copyFileToCacheDir = false;
-  String _pickedFilePath = '';
 
   void _handleRadioValueChange1(int value) {
     setState(() {
@@ -84,11 +76,13 @@ class _MyHomePageState extends State<MyHomePage> {
         case 0:
           encryptionMode = true;
           runButtonText = 'encrypt';
+          chooseFileButtonText = 'choose a file for encryption';
           _clearController();
           break;
         case 1:
           encryptionMode = false;
           runButtonText = 'decrypt';
+          chooseFileButtonText = 'choose a file for decryption';
           _clearController();
           break;
       }
@@ -134,7 +128,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   // false = disabled, true = enabled
                   maxLines: 3,
                   decoration: InputDecoration(
-                    labelText: 'Beschreibung',
+                    labelText: 'description',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -205,80 +199,59 @@ class _MyHomePageState extends State<MyHomePage> {
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                            //primary: Colors.grey,
-                            primary: Colors.green,
+                            primary: Colors.blue,
                             textStyle: TextStyle(color: Colors.white)),
                         onPressed: () async {
-                          //      plaintextController.text = '';
+                          messageController.text = '';
+                          // delete temp names
+                          cipherFilenameTemp = '';
+                          decryptFilenameTemp = '';
                           final params = OpenFileDialogParams(
                             dialogType: OpenFileDialogType.document,
                             sourceType: SourceType.photoLibrary,
                           );
-                          final filePath = await FlutterFileDialog.pickFile(params: params);
+                          final filePath =
+                              await FlutterFileDialog.pickFile(params: params);
+                          if (filePath == null) return;
                           print(filePath);
                           sourceFileController.text = filePath.toString();
-                          /*
-                          _pickFile();
-                          if (_pickedFilePath != '') {
-                            print('folgende Datei wurde ausgewählt: ' + _pickedFilePath);
-                          } else {
-                            print('load: nothing choosen');
-                          }
-                          print('_pickFile pressed');
-                          sourceFileController.text = _currentFile!.path;
-
-                           */
-                        },
-                        //child: Text('Feld löschen'),
-                        child: Text('fd choose'),
-                      ),
-                    ),
-                    SizedBox(width: 15),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                            primary: Colors.blue,
-                            textStyle: TextStyle(color: Colors.white)),
-                        onPressed: () async {
+                          // get internal app directory
                           Directory directory =
-                          await getApplicationDocumentsDirectory();
-                          final String sourceFilePath =
-                              '${directory.path}/source.txt';
-
-                          // here: for encryptio as well
-                          final String cipherFilePath =
-                              '${directory.path}/cipher.txt';
-
-                          // here for decryption
-                          final String decryptFilePath = '${directory
-                              .path}/decrypt.txt';
-
+                              await getApplicationDocumentsDirectory();
+                          // destination filename depends on encryption or decryption mode
+                          String destinationFilePath = '';
                           if (encryptionMode) {
                             // encryption
-                            sourceFileController.text = sourceFilePath;
-                            destinationFileController.text = cipherFilePath;
-
-                            // for test purposes we generate a test file
-                            if (_fileExistsSync(sourceFilePath)) {
-                              _deleteFileSync(sourceFilePath);
-                            }
-                            // generate a 'large' file with random content
-                            final int testDataLength = (1024 * 9 - 2); // 1 mb
-                            //final int testDataLength = (1024 * 7 + 0);
-                            final step1 = Stopwatch()
-                              ..start();
-                            Uint8List randomData =
-                            _generateRandomByte(testDataLength);
-                            _generateLargeFileSync(
-                                sourceFilePath, randomData, 1);
-                            //_generateLargeFileSync(sourceFilePath, randomData, 50);
+                            // get the filename of the selected file
+                            String filename = basename(filePath);
+                            // add the extension to the orifinal filename
+                            destinationFilePath =
+                                '${directory.path}/${filename}${cipherFilenameExt}';
+                            cipherFilenameTemp =
+                                destinationFilePath; // store in global
                           } else {
                             // decryption
-                            sourceFileController.text = cipherFilePath;
-                            destinationFileController.text = decryptFilePath;
+                            // get the filename of the selected file
+                            String filename = basename(filePath);
+                            // check for file extension
+                            String filenameExtension = extension(filename);
+                            if (filenameExtension != cipherFilenameExt) {
+                              // not an encrypted file
+                              messageController.text =
+                                  'ERROR: This is not an encrypted file'
+                                  '\nNo decryption possible';
+                              return;
+                            } else {
+                              // strip off the extension
+                              String newDestinationFilename =
+                                  filename.replaceAll(cipherFilenameExt, '');
+                              destinationFilePath =
+                                  '${directory.path}/${newDestinationFilename}';
+                              decryptFilenameTemp = destinationFilePath;
+                            }
                           }
                         },
-                        child: Text('choose a file to load'),
+                        child: Text(chooseFileButtonText),
                       ),
                     ),
                   ],
@@ -289,7 +262,6 @@ class _MyHomePageState extends State<MyHomePage> {
                 TextFormField(
                   controller: passwordController,
                   enabled: true,
-                  // false = disabled, true = enabled
                   style: TextStyle(
                     fontSize: 15,
                   ),
@@ -321,16 +293,6 @@ class _MyHomePageState extends State<MyHomePage> {
                         child: Text('clear field'),
                       ),
                     ),
-                    SizedBox(width: 15),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                            primary: Colors.blue,
-                            textStyle: TextStyle(color: Colors.white)),
-                        onPressed: () async {},
-                        child: Text('aus Zwischenablage einfügen'),
-                      ),
-                    ),
                   ],
                 ),
 
@@ -346,9 +308,8 @@ class _MyHomePageState extends State<MyHomePage> {
                         onPressed: () {
                           _formKey.currentState!.reset();
                           _clearController();
-                          //messageController.text = '';
                         },
-                        child: Text('Formulardaten löschen'),
+                        child: Text('clear form'),
                       ),
                     ),
                     SizedBox(width: 25),
@@ -363,17 +324,17 @@ class _MyHomePageState extends State<MyHomePage> {
                             if (encryptionMode) {
                               // true = encryption
                               String sourceFilePath = sourceFileController.text;
-                              String destinationFilePath =
-                                  destinationFileController.text;
+                              //String destinationFilePath = destinationFileController.text;
+                              String destinationFilePath = cipherFilenameTemp;
                               String password = passwordController.text;
                               // check if source file exists, if false: return
                               if (!_fileExistsSync(sourceFilePath)) {
                                 messageController.text =
-                                'source file does not exist, aborted';
+                                    'source file does not exist, aborted';
                                 return;
                               } else {
                                 int fileLength =
-                                await _getFileLength(sourceFilePath);
+                                    await _getFileLength(sourceFilePath);
                                 messageController.text = 'source file is ' +
                                     fileLength.toString() +
                                     ' bytes long';
@@ -387,37 +348,43 @@ class _MyHomePageState extends State<MyHomePage> {
                                 messageController.text = message;
                               }
                               // encrypt
+                              final encryptStopwatch = Stopwatch()..start();
                               try {
                                 await _encryptAesGcmRandomNoncePbkdf2(
-                                    sourceFilePath,
-                                    destinationFilePath,
-                                    password)
+                                        sourceFilePath,
+                                        destinationFilePath,
+                                        password)
                                     .then((value) {})
-                                    .catchError( (err) {
-                                  messageController.text = '*** Error on encryption ***';
-                                  return;
+                                    .catchError((err) async {
+                                  messageController.text =
+                                      '*** Error on encryption ***';
+                                  // delete cacheDir
+                                  await _deleteCacheDir();
                                 });
                               } catch (error) {
-                                messageController.text = '*** Error on encryption ***';
-                                return;
+                                messageController.text =
+                                    '*** Error on encryption ***';
+                                // delete cacheDir
+                                await _deleteCacheDir();
                               }
-                              /*
-                              await _encryptAesGcmRandomNoncePbkdf2(
-                                  sourceFilePath,
-                                  destinationFilePath,
-                                  password);
-
-                               */
+                              var encryptElapsed =
+                                  encryptStopwatch.elapsedMilliseconds;
                               // check if destination file exists, if true: give a message
                               if (_fileExistsSync(destinationFilePath)) {
                                 int fileLength =
-                                await _getFileLength(destinationFilePath);
+                                    await _getFileLength(destinationFilePath);
                                 String message = messageController.text;
-                                message = 'destination file is ' +
+                                message = 'File successfully encrypted\n' +
+                                    'in ' +
+                                    encryptElapsed.toString() +
+                                    ' milliseconds\n' +
+                                    'destination file is ' +
                                     fileLength.toString() +
                                     ' bytes long\n' +
                                     message;
                                 messageController.text = message;
+                                // delete appDir
+                                await _deleteAppDir();
                                 return;
                               } else {
                                 String message = messageController.text;
@@ -430,17 +397,17 @@ class _MyHomePageState extends State<MyHomePage> {
                             } else {
                               // start of decryption
                               String sourceFilePath = sourceFileController.text;
-                              String destinationFilePath =
-                                  destinationFileController.text;
+                              //String destinationFilePath = destinationFileController.text;
+                              String destinationFilePath = decryptFilenameTemp;
                               String password = passwordController.text;
                               // check if source file exists, if false: return
                               if (!_fileExistsSync(sourceFilePath)) {
                                 messageController.text =
-                                'source file does not exist, aborted';
+                                    'source file does not exist, aborted';
                                 return;
                               } else {
                                 int fileLength =
-                                await _getFileLength(sourceFilePath);
+                                    await _getFileLength(sourceFilePath);
                                 messageController.text = 'source file is ' +
                                     fileLength.toString() +
                                     ' bytes long';
@@ -454,54 +421,54 @@ class _MyHomePageState extends State<MyHomePage> {
                                 messageController.text = message;
                               }
                               // decrypt
+                              final decryptStopwatch = Stopwatch()..start();
                               try {
                                 await _decryptAesGcmRandomNoncePbkdf2(
-                                    sourceFilePath,
-                                    destinationFilePath,
-                                    password)
+                                        sourceFilePath,
+                                        destinationFilePath,
+                                        password)
                                     .then((value) {})
-                                    .catchError( (err) {
-                                  messageController.text = '*** Error on decryption ***';
+                                    .catchError((err) async {
+                                  messageController.text =
+                                      '*** Error on decryption ***';
+                                  // delete cacheDir
+                                  await _deleteCacheDir();
                                   return;
                                 });
                               } catch (error) {
-                                messageController.text = '*** Error on decryption ***';
+                                messageController.text =
+                                    '*** Error on decryption ***';
+                                // delete cacheDir
+                                await _deleteCacheDir();
                                 return;
                               }
-                              /* with error dialog
-                              try {
-                                await _decryptAesGcmRandomNoncePbkdf2(
-                                    sourceFilePath,
-                                    destinationFilePath,
-                                    password)
-                                    .then((value) {})
-                                    .catchError( (err) {
-                                  _showErrorDialog(err.toString());
-                                }); // Intentinally invalid credentials
-                              } catch (error) {
-                                _showErrorDialog(error.toString());
-                              }*/
-                              /*
-                                await _decryptAesGcmRandomNoncePbkdf2(
-                                    sourceFilePath,
-                                    destinationFilePath,
-                                    password);
-*/
+                              var decryptElapsed =
+                                  decryptStopwatch.elapsedMilliseconds;
+                              // delete cacheDir
+                              await _deleteCacheDir();
                               // check if destination file exists, if true: give a message
                               if (_fileExistsSync(destinationFilePath)) {
                                 int fileLength =
-                                await _getFileLength(destinationFilePath);
+                                    await _getFileLength(destinationFilePath);
                                 String message = messageController.text;
-                                message = 'destination file is ' +
+                                message = 'File successfully decrypted\n' +
+                                    'in ' +
+                                    decryptElapsed.toString() +
+                                    ' milliseconds\n' +
+                                    'destination file is ' +
                                     fileLength.toString() +
                                     ' bytes long\n' +
                                     message;
                                 messageController.text = message;
+                                return;
                               } else {
                                 String message = messageController.text;
                                 message =
                                     '*** ERROR on decryption ***\n' + message;
                                 messageController.text = message;
+                                // delete appDir
+                                await _deleteAppDir();
+                                return;
                               }
                               // end of decryption
                             }
@@ -528,6 +495,41 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                 ),
                 SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                            primary: Colors.blue,
+                            textStyle: TextStyle(color: Colors.white)),
+                        onPressed: () async {
+                          String saveFilePath = '';
+                          if (encryptionMode) {
+                            // encryption
+                            saveFilePath = cipherFilenameTemp;
+                          } else {
+                            // decryption
+                            saveFilePath = decryptFilenameTemp;
+                          }
+                          final params = SaveFileDialogParams(
+                              //sourceFilePath: destinationFileController.text);
+                              sourceFilePath: saveFilePath);
+                          final filePath =
+                              await FlutterFileDialog.saveFile(params: params);
+                          // delete appDir
+                          await _deleteAppDir();
+                          if (filePath != null) {
+                            destinationFileController.text = filePath;
+                            _deleteFileSync(saveFilePath);
+                          }
+                        },
+                        child: Text('choose a file to save'),
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 20),
                 TextFormField(
                   controller: destinationFileController,
                   readOnly: true,
@@ -538,41 +540,6 @@ class _MyHomePageState extends State<MyHomePage> {
                     hintText: 'destination file',
                     border: OutlineInputBorder(),
                   ),
-                ),
-                SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: <Widget>[
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                            primary: Colors.grey,
-                            textStyle: TextStyle(color: Colors.white)),
-                        onPressed: () {},
-                        child: Text('Feld löschen'),
-                      ),
-                    ),
-                    SizedBox(width: 15),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                            primary: Colors.blue,
-                            textStyle: TextStyle(color: Colors.white)),
-                        onPressed: () async {
-
-                            // encryption
-                            final params = SaveFileDialogParams(sourceFilePath:destinationFileController.text);
-                            final filePath = await FlutterFileDialog.saveFile(params: params);
-                            print(filePath);
-
-
-
-
-                        },
-                        child: Text('choose a file to save'),
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
@@ -595,26 +562,18 @@ class _MyHomePageState extends State<MyHomePage> {
       RandomAccessFile rafR = await fileSourceRaf.open(mode: FileMode.read);
       RandomAccessFile rafW = await fileDestRaf.open(mode: FileMode.write);
       var fileRLength = await rafR.length();
-      print('bufferLength: ' +
-          bufferLength.toString() +
-          ' fileRLength: ' +
-          fileRLength.toString());
       await rafR.setPosition(0); // from position 0
       int fullRounds = fileRLength ~/ bufferLength;
       int remainderLastRound = (fileRLength % bufferLength) as int;
-      print('fullRounds: ' +
-          fullRounds.toString() +
-          ' remainderLastRound: ' +
-          remainderLastRound.toString());
       // derive key from password
       var passphrase = createUint8ListFromString(password);
       final salt = _generateRandomByte(saltLength);
       // generate and store salt in destination file
       await rafW.writeFrom(salt);
       pc.KeyDerivator derivator =
-      new pc.PBKDF2KeyDerivator(new pc.HMac(new pc.SHA256Digest(), 64));
+          new pc.PBKDF2KeyDerivator(new pc.HMac(new pc.SHA256Digest(), 64));
       pc.Pbkdf2Parameters params =
-      new pc.Pbkdf2Parameters(salt, PBKDF2_ITERATIONS, 32);
+          new pc.Pbkdf2Parameters(salt, PBKDF2_ITERATIONS, 32);
       derivator.init(params);
       final key = derivator.process(passphrase);
       // generate and store nonce in destination file
@@ -623,7 +582,7 @@ class _MyHomePageState extends State<MyHomePage> {
       // pointycastle cipher setup
       final cipher = pc.GCMBlockCipher(pc.AESEngine());
       var aeadParameters =
-      pc.AEADParameters(pc.KeyParameter(key), 128, nonce, Uint8List(0));
+          pc.AEADParameters(pc.KeyParameter(key), 128, nonce, Uint8List(0));
       cipher.init(true, aeadParameters); // true = encryption
       // now we are running the full rounds
       for (int rounds = 0; rounds < fullRounds; rounds++) {
@@ -638,8 +597,7 @@ class _MyHomePageState extends State<MyHomePage> {
         await rafW.writeFrom(bytesLoadEncrypted);
       } else {
         Uint8List bytesLoadEncrypted =
-        new Uint8List(16); // append one block with padding
-        //int lastRoundEncryptLength = paddingCipher.doFinal(Uint8List(0), 0, bytesLoadEncrypted, 0);
+            new Uint8List(16); // append one block with padding
         int lastRoundEncryptLength = cipher.doFinal(bytesLoadEncrypted, 0);
         await rafW.writeFrom(bytesLoadEncrypted);
       }
@@ -652,7 +610,7 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-// using random access file, nonce is stored in sourceFilePath
+  // using random access file, nonce is stored in sourceFilePath
   _decryptAesGcmRandomNoncePbkdf2(String sourceFilePath,
       String destinationFilePath, String password) async {
     try {
@@ -665,17 +623,9 @@ class _MyHomePageState extends State<MyHomePage> {
       RandomAccessFile rafR = await fileSourceRaf.open(mode: FileMode.read);
       RandomAccessFile rafW = await fileDestRaf.open(mode: FileMode.write);
       var fileRLength = await rafR.length();
-      print('bufferLength: ' +
-          bufferLength.toString() +
-          ' fileRLength: ' +
-          fileRLength.toString());
       await rafR.setPosition(0); // from position 0
       int fullRounds = fileRLength ~/ bufferLength;
       int remainderLastRound = (fileRLength % bufferLength) as int;
-      print('fullRounds: ' +
-          fullRounds.toString() +
-          ' remainderLastRound: ' +
-          remainderLastRound.toString());
       // derive key from password
       // load salt from file
       final Uint8List salt = await rafR.read(saltLength);
@@ -683,15 +633,15 @@ class _MyHomePageState extends State<MyHomePage> {
       final Uint8List nonce = await rafR.read(nonceLength);
       var passphrase = createUint8ListFromString(password);
       pc.KeyDerivator derivator =
-      new pc.PBKDF2KeyDerivator(new pc.HMac(new pc.SHA256Digest(), 64));
+          new pc.PBKDF2KeyDerivator(new pc.HMac(new pc.SHA256Digest(), 64));
       pc.Pbkdf2Parameters params =
-      new pc.Pbkdf2Parameters(salt, PBKDF2_ITERATIONS, 32);
+          new pc.Pbkdf2Parameters(salt, PBKDF2_ITERATIONS, 32);
       derivator.init(params);
       final key = derivator.process(passphrase);
       // pointycastle cipher setup
       final cipher = pc.GCMBlockCipher(pc.AESEngine());
       var aeadParameters =
-      pc.AEADParameters(pc.KeyParameter(key), 128, nonce, Uint8List(0));
+          pc.AEADParameters(pc.KeyParameter(key), 128, nonce, Uint8List(0));
       cipher.init(false, aeadParameters); // false = decryption
       // now we are running the full rounds
       // correct number of full rounds if remaininderLastRound == 0
@@ -711,8 +661,8 @@ class _MyHomePageState extends State<MyHomePage> {
         await rafW.writeFrom(bytesLoadDecrypted);
       } else {
         /*
-      do nothing
-    */
+        do nothing
+        */
       }
       // close all files
       await rafW.flush();
@@ -735,7 +685,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Uint8List _generateRandomByte(int length) {
     final _sGen = Random.secure();
     final _seed =
-    Uint8List.fromList(List.generate(32, (n) => _sGen.nextInt(255)));
+        Uint8List.fromList(List.generate(32, (n) => _sGen.nextInt(255)));
     pc.SecureRandom sec = pc.SecureRandom("Fortuna")
       ..seed(pc.KeyParameter(_seed));
     return sec.nextBytes(length);
@@ -767,38 +717,11 @@ class _MyHomePageState extends State<MyHomePage> {
     return file.existsSync();
   }
 
-// reading from a file
-  Uint8List _readUint8ListSync(String path) {
-    File file = File(path);
-    return file.readAsBytesSync();
-  }
-
-// writing to a file
-  _writeUint8ListSync(String path, Uint8List data) {
-    File file = File(path);
-    file.writeAsBytesSync(data);
-  }
-
-// writing to a file
-  _writeUint8List(String path, Uint8List data) async {
-    File file = File(path);
-    await file.writeAsBytes(data);
-  }
-
-// generate a large testfile with random data
-  _generateLargeFileSync(String path, Uint8List data, int numberWrite) {
-    File file = File(path);
-    for (int i = 0; i < numberWrite; i++) {
-      file.writeAsBytesSync(data, mode: FileMode.writeOnlyAppend);
-    }
-  }
-
   Future<List> _getFiles() async {
-    //String folderName="MyFiles";
     String folderName = '';
     final directory = await getApplicationDocumentsDirectory();
     final Directory _appDocDirFolder =
-    Directory('${directory.path}/${folderName}/');
+        Directory('${directory.path}/${folderName}/');
     if (await _appDocDirFolder.exists()) {
       //if folder already exists return path
       return _appDocDirFolder.listSync();
@@ -806,85 +729,17 @@ class _MyHomePageState extends State<MyHomePage> {
     return List.empty(growable: true);
   }
 
-  // ************ file dialog
-
-  Future<void> _pickFile() async {
-    String? result = '';
-    try {
-      setState(() {
-        _isBusy = true;
-        //_currentFile = null;
-        _currentFile = File('');
-      });
-      final params = OpenFileDialogParams(
-        dialogType: _dialogType,
-        sourceType: _sourceType,
-        allowEditing: _allowEditing,
-        localOnly: _localOnly,
-        //copyFileToCacheDir: _copyFileToCacheDir, // true = copy
-        copyFileToCacheDir: false,
-
-      );
-      result = (await FlutterFileDialog.pickFile(params: params));
-      print(result);
-    } on PlatformException catch (e) {
-      print(e);
-    } finally {
-      setState(() {
-        if (result != null) {
-          _pickedFilePath = result; }
-        else {_pickedFilePath = '';}
-        if (result != null) {
-          _currentFile = File(result);
-        } else {
-          _currentFile = null;
-        }
-        _isBusy = false;
-      });
+  Future<void> _deleteCacheDir() async {
+    final cacheDir = await getTemporaryDirectory();
+    if (cacheDir.existsSync()) {
+      cacheDir.deleteSync(recursive: true);
     }
   }
 
-  Future<void> _saveFile(bool useData) async {
-    String result = '';
-    try {
-      setState(() {
-        _isBusy = true;
-      });
-      final data = useData ? await _currentFile!.readAsBytes() : null;
-      final params = SaveFileDialogParams(
-          sourceFilePath: useData ? null : _currentFile!.path,
-          data: data,
-          localOnly: _localOnly,
-          fileName: useData ? "untitled" : null);
-      result = (await FlutterFileDialog.saveFile(params: params))!;
-      print(result);
-    } on PlatformException catch (e) {
-      print(e);
-    } finally {
-      setState(() {
-        _savedFilePath = result;//
-        _isBusy = false;
-      });
+  Future<void> _deleteAppDir() async {
+    final appDir = await getApplicationSupportDirectory();
+    if (appDir.existsSync()) {
+      appDir.deleteSync(recursive: true);
     }
-  }
-
-  // ************ error dialog
-
-  void _showErrorDialog(String message) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('An Error Occurred!'),
-        content: Text(message),
-        actions: <Widget>[
-          FlatButton(
-            child: Text('Okay'),
-            onPressed: () {
-              Navigator.of(ctx).pop();
-            },
-          )
-        ],
-      ),
-    );
   }
 }
