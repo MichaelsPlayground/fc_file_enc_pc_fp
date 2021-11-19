@@ -1,5 +1,7 @@
 # fc_file_enc_pc_fp
 
+/Users/michaelfehr/Library/Developer/CoreSimulator/Devices/0A281A7E-86C0-444A-BEC2-BFC27649E0B0/data/Containers/Shared/AppGroup/EF9B7A0C-BAB3-4AD1-93FA-FD6B08883AE4/File Provider Storage/Downloads/emulatorfiles/Abc3.rtf
+
 uses flutter file dialog for file choosing
 
 uses pointycastle for aes gcm pbkdf2 file encryption
@@ -56,6 +58,33 @@ Then compress the "Payload" folder and rename to "YouAppName.ipa". (make sure to
 And it's done.
 The solution will help you get .ipa file without signing.
 ```
+
+iOS:
+```plaintext
+File successfully encrypted
+in 12707 milliseconds
+destination file is 10132586 bytes long
+source file is 10132526 bytes long
+
+File successfully decrypted
+in 12694 milliseconds
+destination file is 10132526 bytes long
+source file is 10132586 bytes long
+```
+
+```plaintext
+File successfully encrypted
+in 13855 milliseconds
+destination file is 10132586 bytes long
+source file is 10132526 bytes long
+
+File successfully decrypted
+in 13880 milliseconds
+destination file is 10132526 bytes long
+destination file deleted
+source file is 10132586 bytes long
+```
+
 
 A new Flutter project.
 
